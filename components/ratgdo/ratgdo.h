@@ -31,7 +31,6 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
 
-#include <bitset>
 #include <type_traits>
 #include <utility>
 
@@ -139,7 +138,6 @@ public:
 
 #ifdef RATGDO_USE_DISTANCE_SENSOR
     single_observable<int16_t> target_distance_measurement { -1 };
-    std::bitset<256> in_range; // the length of this bitset determines how many out of range readings are required for presence detection to change states
     observable<int16_t, RATGDO_MAX_DISTANCE_SUBSCRIBERS> last_distance_measurement { 0 };
 #endif
 
@@ -464,8 +462,9 @@ protected:
     uint8_t vehicle_detected_sub_num_ { 0 };
     uint8_t vehicle_arriving_sub_num_ { 0 };
     uint8_t vehicle_leaving_sub_num_ { 0 };
-    int last_presence_percent_ { -1 };
-    int presence_off_counter_ { 0 };
+    uint32_t in_range_since_ { 0 }; // millis() when the current continuous in-range run started, 0 = not in range
+    uint32_t out_of_range_since_ { 0 }; // millis() when the current continuous out-of-range run started, 0 = in range
+    int16_t stable_distance_reference_ { 0 }; // reading the current in-range run is checked against for drift
     DoorState last_door_state_for_presence_ { DoorState::UNKNOWN };
 #endif
 }; // RATGDOComponent

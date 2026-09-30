@@ -60,12 +60,14 @@ static constexpr int CLEAR_PRESENCE = 60000; // how long to keep arriving/leavin
 static constexpr int PRESENCE_DETECT_WINDOW = 300000; // how long to calculate presence after door state change
 static constexpr int PRESENCE_DETECT_WINDOW_AFTER_CLOSE = 15000; // how long to keep presence window active after door reaches closed
 
-// increasing these values increases reliability but also increases detection
-// time
-static constexpr int PRESENCE_DETECTION_ON_THRESHOLD = 5; // Minimum percentage of valid bitset::in_range samples required to
-                                                          // detect vehicle
-static constexpr int PRESENCE_DETECTION_OFF_DEBOUNCE = 2; // The number of consecutive bitset::in_range iterations that must be 0
-                                                          // before clearing vehicle detected state
+// A person walking under the sensor clears it in well under a second and drifts in
+// distance the whole time; a car pulling in and parking holds a stable reading for
+// multiple seconds. Requiring both sustained AND stable presence rejects the former
+// without delaying the latter. Increasing these values increases reliability but also
+// increases detection time.
+static constexpr uint32_t VEHICLE_DETECT_ON_DWELL_MS = 2000; // continuous, stable in-range time required to detect a vehicle
+static constexpr uint32_t VEHICLE_DETECT_OFF_DWELL_MS = 20000; // continuous out-of-range time required to clear detection
+static constexpr int16_t VEHICLE_DETECT_STABILITY_TOLERANCE_MM = 100; // max drift from the reference reading still considered "stable"
 #endif
 
 #ifdef RATGDO_USE_ENCODER
@@ -584,8 +586,21 @@ void RATGDOComponent::set_distance_measurement(int16_t distance)
     this->last_distance_measurement = distance;
 
 #ifdef RATGDO_USE_VEHICLE_SENSORS
-    this->in_range <<= 1;
-    this->in_range.set(0, distance <= *this->target_distance_measurement);
+    uint32_t now = millis();
+    if (distance <= *this->target_distance_measurement) {
+        int16_t drift = distance - this->stable_distance_reference_;
+        if (this->in_range_since_ == 0 || drift > VEHICLE_DETECT_STABILITY_TOLERANCE_MM || drift < -VEHICLE_DETECT_STABILITY_TOLERANCE_MM) {
+            // Either the start of a new in-range run, or the reading has drifted too far
+            // from the reference to still be the same stationary object; (re)start the run.
+            this->in_range_since_ = now;
+            this->stable_distance_reference_ = distance;
+        }
+        this->out_of_range_since_ = 0;
+    } else {
+        if (this->out_of_range_since_ == 0)
+            this->out_of_range_since_ = now;
+        this->in_range_since_ = 0;
+    }
     this->calculate_presence();
 #endif
 }
@@ -594,27 +609,19 @@ void RATGDOComponent::set_distance_measurement(int16_t distance)
 #ifdef RATGDO_USE_VEHICLE_SENSORS
 void RATGDOComponent::calculate_presence()
 {
-    int percent = this->in_range.count() * 100 / this->in_range.size();
+    uint32_t now = millis();
 
-    if (percent >= PRESENCE_DETECTION_ON_THRESHOLD)
+    // A vehicle can only enter the garage while the door is open, so a new detection
+    // while it's closed must be something else (e.g. a person on foot).
+    if (*this->door_state != DoorState::CLOSED && this->in_range_since_ != 0
+        && now - this->in_range_since_ >= VEHICLE_DETECT_ON_DWELL_MS) {
         this->vehicle_detected_state = VehicleDetectedState::YES;
-
-    if (percent == 0 && *this->vehicle_detected_state == VehicleDetectedState::YES) {
-        this->presence_off_counter_++;
-        ESP_LOGD(TAG, "Off counter: %d", this->presence_off_counter_);
-
-        if (this->presence_off_counter_ / this->in_range.size() >= PRESENCE_DETECTION_OFF_DEBOUNCE) {
-            this->presence_off_counter_ = 0;
-            this->vehicle_detected_state = VehicleDetectedState::NO;
-        }
     }
 
-    if (percent != this->last_presence_percent_) {
-        ESP_LOGD(TAG, "pct_in_range: %d", percent);
-        this->last_presence_percent_ = percent;
-        this->presence_off_counter_ = 0;
+    if (*this->vehicle_detected_state == VehicleDetectedState::YES && this->out_of_range_since_ != 0
+        && now - this->out_of_range_since_ >= VEHICLE_DETECT_OFF_DWELL_MS) {
+        this->vehicle_detected_state = VehicleDetectedState::NO;
     }
-    // ESP_LOGD(TAG, "in_range: %s", this->in_range.to_string().c_str());
 }
 #endif
 
