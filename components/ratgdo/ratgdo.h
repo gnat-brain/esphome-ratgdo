@@ -465,6 +465,7 @@ protected:
     uint32_t in_range_since_ { 0 }; // millis() when the current continuous in-range run started, 0 = not in range
     uint32_t out_of_range_since_ { 0 }; // millis() when the current continuous out-of-range run started, 0 = in range
     int16_t stable_distance_reference_ { 0 }; // reading the current in-range run is checked against for drift
+    bool door_closed_blocked_logged_ { false }; // avoids re-logging every loop while a stable object waits on the door
     DoorState last_door_state_for_presence_ { DoorState::UNKNOWN };
 #endif
 }; // RATGDOComponent

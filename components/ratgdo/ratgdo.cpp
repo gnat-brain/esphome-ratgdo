@@ -68,6 +68,13 @@ static constexpr int PRESENCE_DETECT_WINDOW_AFTER_CLOSE = 15000; // how long to 
 static constexpr uint32_t VEHICLE_DETECT_ON_DWELL_MS = 2000; // continuous, stable in-range time required to detect a vehicle
 static constexpr uint32_t VEHICLE_DETECT_OFF_DWELL_MS = 20000; // continuous out-of-range time required to clear detection
 static constexpr int16_t VEHICLE_DETECT_STABILITY_TOLERANCE_MM = 100; // max drift from the reference reading still considered "stable"
+
+// A restart clears all in-memory presence state even if a vehicle was already parked with
+// the door closed beforehand. The door-closed check below exists to reject *new* arrivals
+// while the door is shut, but re-establishing ground truth after a restart isn't a new
+// arrival, so skip that check for a bounded window after boot and trust a stable reading
+// on its own.
+static constexpr uint32_t VEHICLE_DETECT_STARTUP_GRACE_MS = 30000;
 #endif
 
 #ifdef RATGDO_USE_ENCODER
@@ -594,6 +601,7 @@ void RATGDOComponent::set_distance_measurement(int16_t distance)
             // from the reference to still be the same stationary object; (re)start the run.
             this->in_range_since_ = now;
             this->stable_distance_reference_ = distance;
+            this->door_closed_blocked_logged_ = false;
         }
         this->out_of_range_since_ = 0;
     } else {
@@ -611,16 +619,27 @@ void RATGDOComponent::calculate_presence()
 {
     uint32_t now = millis();
 
-    // A vehicle can only enter the garage while the door is open, so a new detection
-    // while it's closed must be something else (e.g. a person on foot).
-    if (*this->door_state != DoorState::CLOSED && this->in_range_since_ != 0
-        && now - this->in_range_since_ >= VEHICLE_DETECT_ON_DWELL_MS) {
-        this->vehicle_detected_state = VehicleDetectedState::YES;
+    // A vehicle can only enter the garage while the door is open, so a new detection while
+    // it's closed must be something else (e.g. a person on foot) — except right after boot,
+    // when a closed door tells us nothing about whether a vehicle was already parked before
+    // the restart wiped our in-memory state.
+    bool door_open_or_booting = *this->door_state != DoorState::CLOSED || now < VEHICLE_DETECT_STARTUP_GRACE_MS;
+    if (this->in_range_since_ != 0 && now - this->in_range_since_ >= VEHICLE_DETECT_ON_DWELL_MS) {
+        if (door_open_or_booting) {
+            if (*this->vehicle_detected_state != VehicleDetectedState::YES) {
+                ESP_LOGD(TAG, "Vehicle detected: stable at %dmm for %ums", this->stable_distance_reference_, (unsigned)VEHICLE_DETECT_ON_DWELL_MS);
+            }
+            this->vehicle_detected_state = VehicleDetectedState::YES;
+        } else if (!this->door_closed_blocked_logged_) {
+            this->door_closed_blocked_logged_ = true;
+            ESP_LOGD(TAG, "Object stable at %dmm but door is closed; ignoring", this->stable_distance_reference_);
+        }
     }
 
     if (*this->vehicle_detected_state == VehicleDetectedState::YES && this->out_of_range_since_ != 0
         && now - this->out_of_range_since_ >= VEHICLE_DETECT_OFF_DWELL_MS) {
         this->vehicle_detected_state = VehicleDetectedState::NO;
+        ESP_LOGD(TAG, "Vehicle no longer detected");
     }
 }
 #endif
