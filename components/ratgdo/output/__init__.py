@@ -13,6 +13,7 @@ from .. import (
 
 CONF_RTTTL = "rtttl"
 CONF_SONG = "song"
+CONF_VEHICLE_ARRIVING_SONG = "vehicle_arriving_song"
 
 DEPENDENCIES = ["esp32", "ratgdo", "rtttl"]
 
@@ -28,6 +29,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Required(CONF_TYPE): cv.enum(TYPES, lower=True),
         cv.Required(CONF_RTTTL): cv.use_id(rtttl),
         cv.Required(CONF_SONG): cv.string,
+        cv.Optional(CONF_VEHICLE_ARRIVING_SONG, default=""): cv.string,
     }
 ).extend(RATGDO_CLIENT_SCHMEA)
 
@@ -38,6 +40,10 @@ async def to_code(config):
     rtttl = await cg.get_variable(config[CONF_RTTTL])
     cg.add(var.set_rtttl(rtttl))
     cg.add(var.set_song(config[CONF_SONG]))
+    cg.add(var.set_vehicle_arriving_song(config[CONF_VEHICLE_ARRIVING_SONG]))
     await register_ratgdo_child(var, config)
-    subscribe_vehicle_arriving()
+    # Vehicle-arriving is a convenience notification and can be disabled by leaving
+    # its song empty; the door-action-delayed warning song is required.
+    if config[CONF_VEHICLE_ARRIVING_SONG]:
+        subscribe_vehicle_arriving()
     subscribe_door_action_delayed()

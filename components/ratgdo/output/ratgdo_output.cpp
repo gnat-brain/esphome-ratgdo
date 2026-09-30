@@ -12,17 +12,18 @@ void RATGDOOutput::setup()
 
     if (this->output_type_ == OutputType::RATGDO_BEEPER) {
 #ifdef RATGDO_USE_VEHICLE_SENSORS
-        this->parent_->subscribe_vehicle_arriving_state([this](VehicleArrivingState state) {
-            if (state == VehicleArrivingState::YES) {
-                this->play();
-            }
-        });
+        if (!this->vehicleArrivingSong_.empty()) {
+            this->parent_->subscribe_vehicle_arriving_state([this](VehicleArrivingState state) {
+                if (state == VehicleArrivingState::YES) {
+                    this->play(this->vehicleArrivingSong_);
+                }
+            });
+        }
 #endif
 
         this->parent_->subscribe_door_action_delayed([this](DoorActionDelayed state) {
             if (state == DoorActionDelayed::YES) {
-                this->play();
-                this->repeat_ = true;
+                this->play(this->rtttlSong_, /* repeat= */ true);
             } else if (state == DoorActionDelayed::NO) {
                 this->repeat_ = false;
             }
@@ -30,15 +31,17 @@ void RATGDOOutput::setup()
     }
 }
 
-void RATGDOOutput::play()
+void RATGDOOutput::play(const std::string& song, bool repeat)
 {
-    this->beeper_->play(this->rtttlSong_);
+    this->currentSong_ = song;
+    this->repeat_ = repeat;
+    this->beeper_->play(song);
 }
 
 void RATGDOOutput::finished_playback()
 {
     if (this->repeat_)
-        this->play();
+        this->play(this->currentSong_, true);
 }
 
 void RATGDOOutput::dump_config()

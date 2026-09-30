@@ -13,18 +13,21 @@ enum OutputType {
 class RATGDOOutput : public RATGDOClient, public Component {
 public:
     void setup() override;
-    void play();
+    void play(const std::string& song, bool repeat = false);
     void finished_playback();
     void dump_config() override;
     void set_output_type(OutputType output_type);
     void set_song(std::string rtttlSong) { this->rtttlSong_ = rtttlSong; }
+    void set_vehicle_arriving_song(std::string rtttlSong) { this->vehicleArrivingSong_ = rtttlSong; }
     void set_rtttl(rtttl::Rtttl* output) { this->beeper_ = output; }
 
 protected:
     OutputType output_type_;
     rtttl::Rtttl* beeper_;
     std::string rtttlSong_;
-    bool repeat_;
+    std::string vehicleArrivingSong_;
+    std::string currentSong_;
+    bool repeat_ { false };
 };
 
 } // namespace esphome::ratgdo
